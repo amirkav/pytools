@@ -1,7 +1,7 @@
 import pytest
 
-from custody_py_tools.postgresql_local import postgresql_route
-from custody_py_tools.sql import Route, SQLConnect
+from pytools.postgresql_local import postgresql_route
+from pytools.sql import Route, SQLConnect
 
 
 class TestPostgresqlRouteCtxMgr:
