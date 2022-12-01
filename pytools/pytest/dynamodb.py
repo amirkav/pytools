@@ -3,9 +3,9 @@ import os
 from typing import Any, Iterator, NamedTuple
 from unittest.mock import MagicMock, patch
 
-from custody_py_tools.boto3_session_generator import Boto3SessionGenerator
-from custody_py_tools.docker_utils import DockerContainer, get_docker_client, get_docker_container
-from custody_py_tools.dynamo_connect import DynamoConnect
+from pytools.boto3_session_generator import Boto3SessionGenerator
+from pytools.docker_utils import DockerContainer, get_docker_client, get_docker_container
+from pytools.dynamo_connect import DynamoConnect
 
 # Temporarily avoid `pytest` dependency to allow `pylint` to run without installing dev deps:
 # import pytest
