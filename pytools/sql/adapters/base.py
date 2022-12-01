@@ -17,13 +17,13 @@ from typing import (
     Type,
     TypeVar,
     cast,
+    Union,
 )
 
 from pytools.common.class_tools import cached_property
 from pytools.common.dynamic_namespace import DynamicNamespace
 
 from .. import pep249
-from ..type_defs import DatabaseType, QueryParams
 from ..query import Query, QueryT
 from ..route import Route
 
@@ -35,6 +35,7 @@ CursorT = TypeVar("CursorT", bound=pep249.Cursor)
 
 ExecuteContextManagerFactory = Callable[..., ContextManager]
 
+QueryParams = Union[dict[str, Any], Tuple]
 
 # Query execution base classes
 # =============================================================================
@@ -95,27 +96,11 @@ class DatabaseAdapter(Generic[ConnectionT, CursorT], ABC):
     DictCursor: Type[CursorT] = cast(Type[CursorT], pep249.DictCursor)
 
     # Registry mapping database types to adapter classes:
-    # TODO: we may not need this.
-    adapter_class_by_type: Dict[DatabaseType, Type["DatabaseAdapter"]] = {}
-
-    database_type: DatabaseType
 
     # Class methods
     # =========================================================================
 
     # pylint: disable=arguments-differ
-    def __init_subclass__(cls, *, database_type: DatabaseType) -> None:
-        super().__init_subclass__()
-        cls.database_type = database_type
-        cls.adapter_class_by_type[database_type] = cls
-
-    # TODO: remove all of this complexity. We don't need to have this level of code flexibility and mobility. Assume we use one type of database (postgres)
-    @classmethod
-    def adapter_class(cls, database_type: DatabaseType) -> Type["DatabaseAdapter"]:
-        try:
-            return cls.adapter_class_by_type[database_type]
-        except KeyError:
-            raise ValueError(f"Unknown database type: {database_type}") from None
 
     # Methods
     # =========================================================================
@@ -154,6 +139,7 @@ class DatabaseAdapter(Generic[ConnectionT, CursorT], ABC):
         self._connection: Optional[ConnectionT] = None
         self._transaction_level: int = 0
 
+    # TODO: remove this? It looks like it is a Typing gymnastics.
     def _concrete_cursor_class(self, cursor_class: Type[CursorT]) -> Type[CursorT]:
         if cursor_class is pep249.TupleCursor:
             cursor_class = self.TupleCursor
@@ -161,6 +147,7 @@ class DatabaseAdapter(Generic[ConnectionT, CursorT], ABC):
             cursor_class = self.DictCursor
         return cursor_class
 
+    # TODO: remove this?
     def _query_string(self, query_string: QueryT) -> str:
         return query_string[self.database_type] if isinstance(query_string, Query) else query_string
 
@@ -206,6 +193,7 @@ class DatabaseAdapter(Generic[ConnectionT, CursorT], ABC):
     def quote_ident(self, name: str) -> str:
         """Returns a quoted representation of the given identifier."""
 
+    # TODO: combine the following two methods (abstractmethod and property?)
     @abstractmethod
     def connection_count_for_database(self, database: Optional[str] = None) -> int:
         """
@@ -427,7 +415,7 @@ class DatabaseAdapter(Generic[ConnectionT, CursorT], ABC):
     def execute(
         self,
         cursor: CursorT,
-        query_string: QueryT,
+        query_string: str,
         query_params: Optional[QueryParams] = None,
         **kwargs: Any,
     ) -> None:
@@ -439,7 +427,7 @@ class DatabaseAdapter(Generic[ConnectionT, CursorT], ABC):
             query_string: Query | str -- The SQL query to execute.
             query_params: tuple | dict (optional) -- Query parameters.
         """
-        query_string = self._query_string(query_string)
+        # query_string = self._query_string(query_string)
 
         if self.execute_contextmanager:
             with self.execute_contextmanager(cursor, query_string, query_params, **kwargs) as (
@@ -625,8 +613,3 @@ class DatabaseAdapter(Generic[ConnectionT, CursorT], ABC):
         """
         Cancels the current query. The only way to call this is from another thread.
         """
-
-
-def get_adapter_class(database_type: DatabaseType) -> Type[DatabaseAdapter]:
-    """Returns database-specific adapter class for given database type."""
-    return DatabaseAdapter.adapter_class(database_type)

@@ -6,7 +6,6 @@ from .base import (
     QueryPlan,
     QueryPlanNode,
     Rollback,
-    get_adapter_class,
 )
 from .postgresql import PostgreSQLAdapter
 

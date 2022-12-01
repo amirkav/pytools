@@ -1,6 +1,6 @@
 from typing import AnyStr, Iterator, Mapping, Optional, Sequence, Tuple, TypeVar, Union
 
-from custody_py_tools.type_defs import Protocol, runtime_checkable
+from pytools.type_defs import Protocol, runtime_checkable
 
 Params = Union[Sequence, Mapping]
 SeqRow = Sequence

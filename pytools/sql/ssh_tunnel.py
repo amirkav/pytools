@@ -24,9 +24,13 @@ class SSHTunnel(subprocess.Popen):
         compress: bool = True,
         connect_timeout: int = 5,
     ) -> None:
+        """
+        Opens a SSH tunnel to a bastion host and forwards ports.
+        Allows multiple port forwards to be specified.
+        """
         self.compress = compress
         self.port_forwards = list(port_forwards) if port_forwards else []
-        self.bastion_host = bastion_host or os.environ["ALTITUDE_BASTION_HOST"]
+        self.bastion_host = bastion_host or os.environ["BASTION_HOST"]
         self.connect_timeout = connect_timeout
 
         port_forward_args = []
