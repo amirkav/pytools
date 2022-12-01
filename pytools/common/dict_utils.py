@@ -10,9 +10,9 @@ from collections.abc import Collection
 from functools import reduce
 from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional, Tuple
 
-from custody_py_tools import list_tools
-from custody_py_tools.logger import Logger
-from custody_py_tools.string_tools import StringTools
+from pytools.common import list_utils
+from pytools.common.logger import Logger
+from pytools.common.string_utils import StringTools
 
 logger = Logger(__name__)
 
@@ -110,5 +110,5 @@ def chunkify_keys(data: Mapping, size: int) -> Iterator[Dict[Any, Any]]:
         data -- Data to chunkify
         size -- Max chunk size.
     """
-    for items in list_tools.chunkify(data=list(data.items()), size=size):
+    for items in list_utils.chunkify(data=list(data.items()), size=size):
         yield dict(items)

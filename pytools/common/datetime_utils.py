@@ -14,7 +14,7 @@ import pytz
 from dateutil.parser import parser as DateutilParser
 from dateutil.relativedelta import relativedelta
 
-from custody_py_tools.logger import Logger
+from pytools.common.logger import Logger
 
 LOCAL_TIMEZONE_NAME = "America/Los_Angeles"
 

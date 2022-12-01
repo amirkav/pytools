@@ -5,7 +5,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any, Iterable, Optional, Union
 
-from custody_py_tools.logger import Logger
+from pytools.common.logger import Logger
 
 
 class ManagedTempFile:

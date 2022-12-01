@@ -1,7 +1,7 @@
 import time
 from typing import Any, Callable, Generic, Type, TypeVar, Union, overload
 
-from custody_py_tools.logger import Logger
+from pytools.common.logger import Logger
 
 __all__ = ("cached_property",)
 
