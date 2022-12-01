@@ -6,9 +6,9 @@ from unittest.mock import MagicMock, create_autospec, patch
 import moto
 import pytest
 
-import custody_py_tools.testing
-from custody_py_tools.dynamodb_fixtures import dynamodb_local
-from custody_py_tools.sql_fixtures import (
+import pytools.testing
+from pytools.dynamodb_fixtures import dynamodb_local
+from pytools.sql_fixtures import (
     mock_ro_sql_route,
     mock_rw_sql_route,
     mysql_route,
@@ -16,12 +16,12 @@ from custody_py_tools.sql_fixtures import (
     sql_connect,
     sql_route,
 )
-from custody_py_tools.catalogs import Platform
-from custody_py_tools.config import Config
-from custody_py_tools.dynamo.config_manager import ConfigManager
-from custody_py_tools.param_store import ParamStore
-from custody_py_tools.retry_backoff_class import RetryAndCatch
-from custody_py_tools.s3_connect import S3Connect
+from pytools.catalogs import Platform
+from pytools.config import Config
+from pytools.dynamo.config_manager import ConfigManager
+from pytools.param_store import ParamStore
+from pytools.retry_backoff_class import RetryAndCatch
+from pytools.s3_connect import S3Connect
 
 __all__ = (
     "mysql_route",
@@ -35,9 +35,9 @@ __all__ = (
 
 
 def pytest_addoption(parser):
-    custody_py_tools.testing.register_cli_options_rm_containers(parser)
-    custody_py_tools.testing.register_cli_options_mysql(parser)
-    custody_py_tools.testing.register_cli_options_postgresql(parser)
+    pytools.testing.register_cli_options_rm_containers(parser)
+    pytools.testing.register_cli_options_mysql(parser)
+    pytools.testing.register_cli_options_postgresql(parser)
 
 
 # Universal test resources
