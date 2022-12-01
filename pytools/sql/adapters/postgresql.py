@@ -1,22 +1,28 @@
+"""
+Low-level operations on PostgreSQL databases.
+Defines methods to connect, set db parameters, run transactions, explain queries, etc.
+This module is not meant to be used directly, but rather through the higher-level methods
+defined in the `pytools.sql.sql_connect` module.
+"""
+
 import contextlib
 import re
 import sys
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterator, List, Optional, Tuple, Type
+from typing import Any, Iterator, Optional, Tuple, Type
 
 import psycopg2
 import psycopg2.extensions
 import psycopg2.extras
 
-import custody_py_tools.retry_backoff_class
-import custody_py_tools.sql.adapters.base
-import custody_py_tools.sql.sql_connect
-from custody_py_tools.class_tools import cached_property
-from custody_py_tools.file_tools import relativize_path
-from custody_py_tools.retry_backoff_class import RetryAndCatch
+import pytools.common.retry_backoff
+import pytools.sql.adapters.base
+from pytools.common.class_tools import cached_property
+from pytools.common.file_utils import relativize_path
+from pytools.common.retry_backoff import RetryAndBackoff
+from pytools.common.call_stack import getcaller
 
-from ..database_type import DatabaseType
 from ..query import QueryT
 from ..route import Route
 from .base import (
@@ -47,7 +53,7 @@ PostgreSQLDictCursor = psycopg2.extras.RealDictCursor
 # =============================================================================
 
 
-class pg_retry(RetryAndCatch):
+class pg_retry(RetryAndBackoff):
     default_exceptions = (
         # <https://www.psycopg.org/docs/module.html#psycopg2.InterfaceError>
         psycopg2.InterfaceError,
@@ -110,7 +116,7 @@ class PostgreSQLQueryPlanNode(QueryPlanNode):
     inner_unique: Optional[bool] = None
     hash_cond: Optional[str] = None
 
-    nodes: List["PostgreSQLQueryPlanNode"] = field(default_factory=list)
+    nodes: list["PostgreSQLQueryPlanNode"] = field(default_factory=list)
 
 
 @dataclass
@@ -133,7 +139,6 @@ class PostgreSQLQueryPlan(QueryPlan):
 class PostgreSQLAdapter(
     # <https://github.com/python/mypy/issues/9560>
     DatabaseAdapter[PostgreSQLConnection, PostgreSQLCursor],  # type: ignore
-    database_type=DatabaseType.POSTGRESQL,
 ):
     """PostgreSQL database adapter class."""
 
@@ -149,7 +154,6 @@ class PostgreSQLAdapter(
         cursor_class: Type[PostgreSQLCursor] = PostgreSQLCursor,
         execute_contextmanager: Optional[ExecuteContextManagerFactory] = None,
     ) -> None:
-        assert route.database_type == DatabaseType.POSTGRESQL
         self.cursor_class: Type[PostgreSQLCursor]
         super().__init__(
             route,
@@ -166,16 +170,15 @@ class PostgreSQLAdapter(
         # <https://www.postgresql.org/docs/12/runtime-config-logging.html#GUC-APPLICATION-NAME>
         # This makes connections identifiable in the `pg_stat_activity` view.
         # <https://www.postgresql.org/docs/12/monitoring-stats.html#PG-STAT-ACTIVITY-VIEW>
-        caller = custody_py_tools.call_stack.getcaller(
+        caller = getcaller(
             # Ignore frames from within this module:
             ignore_filenames=[__file__],
             # Ignore frames from within these other modules:
             ignore_modules=[
                 contextlib,
-                custody_py_tools.dynamic_namespace,
-                custody_py_tools.retry_backoff_class,
-                custody_py_tools.sql.adapters.base,
-                custody_py_tools.sql.sql_connect,
+                pytools.common.dynamic_namespace,
+                pytools.common.retry_backoff,
+                pytools.sql.adapters.base,
             ],
         )
         caller_filename = relativize_path(caller.filename, sys.path)
@@ -185,7 +188,7 @@ class PostgreSQLAdapter(
             application_name = f"{application_name[:60]}..."
 
         with self.route.physical_route() as route:
-            kwargs: Dict[str, Any] = {
+            kwargs: dict[str, Any] = {
                 "host": route.host,
                 "port": route.port,
                 "user": route.user,
@@ -216,10 +219,10 @@ class PostgreSQLAdapter(
             )
         return self.select_value("SELECT count(*) FROM pg_stat_activity")
 
-    def _getvar(self, path: List[str]) -> Any:
+    def _getvar(self, path: list[str]) -> Any:
         return self.select_value(f"SHOW {'.'.join(path)}")
 
-    def _setvar(self, path: List[str], value: Any) -> None:
+    def _setvar(self, path: list[str], value: Any) -> None:
         cursor = self.connection.cursor()
         cursor.execute(f"SET {'.'.join(path)} = %s", (value,))
 
@@ -366,7 +369,7 @@ class PostgreSQLAdapter(
         result = self.select_value(f"EXPLAIN (FORMAT JSON) {query_string}", query_params)
         root_node = result[0]["Plan"]
 
-        def parse_node(node_dict: Dict[str, Any]) -> PostgreSQLQueryPlanNode:
+        def parse_node(node_dict: dict[str, Any]) -> PostgreSQLQueryPlanNode:
             def normalize_key(key: str) -> str:
                 key = key.lower().replace(" ", "_")
                 if key == "node_type":

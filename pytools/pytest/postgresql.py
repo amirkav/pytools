@@ -5,14 +5,14 @@ Utility functions for writing PostgreSQL-enabled tests in `tools` and other pack
 import os
 from typing import Any, Iterator
 
-from custody_py_tools.sql import DatabaseType, Route
+from pytools.sql import DatabaseType, Route
 
 # Temporarily avoid `pytest` dependency to allow `pylint` to run without installing dev deps:
 # import pytest
 
 
 # isort butchers this import because of the aliased import, hence we tell it to lay off:
-from custody_py_tools.postgresql_local import (  # pylint: disable=unused-import; isort: skip
+from pytools.postgresql_local import (  # pylint: disable=unused-import; isort: skip
     DEFAULT_POSTGRESQL_CONTAINER,
     DEFAULT_POSTGRESQL_VERSION,
     DEFAULT_POSTGRESQL_HOST,

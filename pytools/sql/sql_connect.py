@@ -1,55 +1,44 @@
 """
-Generic methods and logic to connect to the database.
-Do not include any logic specific to data or a table here.
-
-http://docs.aws.amazon.com/elasticbeanstalk/latest/dg/create-deploy-python-rds.html
+High-level methods to run queries against a PostgreSQL database.
+It relies on the low-level methods in `pytools.sql.adapters.postgresql`.
+Does not include any logic specific to data or database structure.
 """
-from __future__ import annotations
 
 import re
-import sys
 from contextlib import contextmanager
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
-    Dict,
     Iterator,
-    List,
     Optional,
     Sequence,
-    Tuple,
     Type,
     TypeVar,
-    Union,
 )
 
 import jinja2
 
-from custody_py_tools.boto3_session_generator import Boto3Session
-from custody_py_tools.default_type import Default, DefaultType
-from custody_py_tools.doc_tools import documented_by
-from custody_py_tools.dynamic_namespace import DynamicNamespace
-from custody_py_tools.logger import Logger
-from custody_py_tools.param_store import ParamStore
-from custody_py_tools.timers import SlowTimer, SlowWarning
+from pytools.aws.boto3_session_generator import Boto3Session
+from pytools.aws.ssm_connect import SsmConnect
+from pytools.common.doc_utils import documented_by
+from pytools.common.dynamic_namespace import DynamicNamespace
+from pytools.common.logger import Logger
 
+from .adapters import PostgreSQLAdapter
 from .adapters.base import (
     DatabaseAdapter,
     IsolationLevel,
     QueryParams,
     QueryPlan,
     QueryPlanNode,
-    get_adapter_class,
 )
-from .database_type import DatabaseType
 from .pep249 import Connection, Cursor, DictCursor, TupleCursor
 from .query import Query, QueryT
 from .route import Route
 
-if TYPE_CHECKING:
-    from custody_py_tools.configs import Configs
+# if TYPE_CHECKING:
+from pytools.app.configs import Configs
 
 __all__ = [
     "SQLConnect",
@@ -81,9 +70,9 @@ class SQLConnect:
     - Automatic retry with exponential back-off (see below)
     - Access to primary key of last inserted row
 
-    RETRY: Certain database errors are automatically retried (generally only those
+    RETRY BEHAVIOR: Certain database errors are automatically retried (generally only those
     that are worth retrying, such as connection errors or certain resource errors)
-    with exponential back-off, using `tools.retry_backoff_class.RetryAndCatch`.
+    with exponential back-off, using `pytools.common.retry_backoff.RetryAndBackoff`.
     """
 
     def __init__(
@@ -99,19 +88,12 @@ class SQLConnect:
         Arguments:
             route -- `Route` object with connection/authentication information.
             cursor_class -- Cursor class to instantiate.
-                For MySQL:
-                    must be a subclass of `pymysql.cursors.Cursor` (default);
-                    cursor classes supported out of the box are `Cursor`, `DictCursor`, `SSCursor`,
-                    `SSDictCursor`.
-                For PostgreSQL:
-                    must be a subclass of `psycopg2.extensions.cursor` (default);
-                    cursor classes supported out of the box are `psycopg2.extensions.cursor`,
-                    `psycopg2.extras.DictCursor`, `psycopg2.extras.RealDictCursor`,
-                    `psycopg2.extras.NamedTupleCursor`.
+                For PostgreSQL, it must be a subclass of `psycopg2.extensions.cursor` (default);
+                cursor classes supported out of the box are `psycopg2.extensions.cursor`,
+                `psycopg2.extras.DictCursor`, `psycopg2.extras.RealDictCursor`,
+                `psycopg2.extras.NamedTupleCursor`.
         """
-        self.database_type = route.database_type
-        adapter_class = get_adapter_class(self.database_type)
-        self.adapter = adapter_class(
+        self.adapter = PostgreSQLAdapter(
             route=route,
             autocommit=autocommit,
             cursor_class=cursor_class or TupleCursor,
@@ -126,10 +108,9 @@ class SQLConnect:
         cls,
         configs: Configs,
         *,
-        database_type: Optional[DatabaseType] = None,
-        bastion_host: Union[Optional[str], DefaultType] = Default,
+        bastion_host: Optional[str] = None,
         boto3_session: Optional[Boto3Session] = None,
-        param_store: Optional[ParamStore] = None,
+        ssm_connect: Optional[SsmConnect] = None,
         use_writer: bool = False,
         use_master: bool = False,
         autocommit: bool = False,
@@ -140,13 +121,11 @@ class SQLConnect:
         given.
 
         Arguments:
-            config -- `tools.config.Config` object that provides AWS region, database endpoints,
+            config -- `pytools.app.config.Config` object that provides AWS region, database endpoints,
                 database user names, and the database name.
-            database_type -- (optional) Database type, one of: `tools.sql.DatabaseType.MYSQL`,
-                `tools.sql.DatabaseType.POSTGRESQL`. (default: MySQL)
             boto3_session -- (optional) `boto3.session.Boto3Session` object that provides access to
                 AWS.
-            param_store -- (optional) `tools.param_store.ParamStore` object that provides database
+            ssm_connect -- (optional) `pytools.aws.ssm_connect.SsmConnect` object that provides database
                 passwords and CA SSL certificates.
             use_writer -- (optional) Boolean indicating whether write access is required.
                 (default: False)
@@ -156,10 +135,9 @@ class SQLConnect:
         """
         route = Route.from_config(
             config=configs,
-            database_type=database_type,
             bastion_host=bastion_host,
             boto3_session=boto3_session,
-            param_store=param_store,
+            ssm_connect=ssm_connect,
             use_writer=use_writer,
             use_master=use_master,
         )
@@ -183,31 +161,22 @@ class SQLConnect:
 
     @staticmethod
     def get_query_string(query_file: Path) -> str:
-        """Reads a formatted SQL statement from `query_file` and returns a unwrapped string."""
+        """Reads a formatted SQL statement from `query_file` and returns an unwrapped string."""
         assert query_file.exists(), f"Query file path not valid: {query_file.as_posix()}"
         return query_file.read_text()
 
     def read_query(
-        self, query_path: Path, query_fragments: Optional[Dict[str, Any]] = None
+        self, query_path: Path, query_fragments: Optional[dict[str, Any]] = None
     ) -> Optional[QueryT]:
         """
         Reads a Jinja2-format template file with the given path and renders the template to a
-        generic (single-database-type) `Query` object using the given query fragments. The
-        `database_type` fragment is implicitly set to a string representing the current database
-        type (`MYSQL` or `POSTGRESQL`), so the template may define database-type-specific SQL:
-
-            {% if database_type == "MYSQL" %}
-            ...
-            {% elif database_type == "POSTGRESQL" %}
-            ...
-            {% endif %}
+        generic `Query` object using the given query fragments.
 
         Arguments:
             query_path: Path -- Path of query template.
             query_fragments: dict -- Mapping of template placeholder names to values.
         """
         query_fragments = query_fragments.copy() if query_fragments else {}
-        query_fragments["database_type"] = self.database_type.name
         template = jinja2.Template(query_path.read_text())
         query_string = template.render(query_fragments).strip()
         return Query(query_string) if query_string else None
@@ -286,27 +255,21 @@ class SQLConnect:
     def _execute_contextmanager(
         self,
         cursor: Cursor,
-        query_string: str,
+        query_string: Query,
         query_params: Optional[QueryParams] = None,
-        *,
-        slow_threshold: Optional[float] = None,
     ) -> Iterator:
         """
         Wraps the execution of an SQL statement in SQLConnect-specific behavior:
         - Log the rendered version of the statement using the configured logger.
-        - If the `slow_threshold` argument was specified in the database adapter call, instrument
-          statement performance if statement takes longer than the threshold.
 
         Arguments:
             cursor -- `Cursor` object on which the provided SQL statement is being executed.
             query_string -- string holding the SQL query, possibly with `%s` or `%(param)s` style
                 placeholders in conjunction with query parameters.
             query_params -- dictionary or tuple with query parameters.
-            slow_threshold -- (optional) float specifying after how many seconds a query is
-                considered slow.
         """
         query_string = self._SQL_QUOTED_IDENTIFIER_PATTERN.sub(
-            lambda match: self.adapter.quote_ident(self.normalize_identifier(match[2])),
+            lambda match: self.adapter.quote_ident(match[2]),
             query_string,
         )
 
@@ -315,21 +278,7 @@ class SQLConnect:
             rendered_query_string = rendered_query_string.decode()
         self._logger.debug(f"Executing query: {rendered_query_string}")
 
-        if slow_threshold is not None:
-
-            def make_warning(timer: SlowTimer) -> SlowWarning:
-                query_plan = self.explain(query_string, query_params)
-                return SlowSQLWarning(
-                    timer, query_string, query_params, rendered_query_string, query_plan
-                )
-
-            with SlowTimer(
-                slow_threshold=slow_threshold, message="Slow SQL query", make_warning=make_warning
-            ):
-                yield query_string, query_params
-
-        else:
-            yield query_string, query_params
+        yield query_string, query_params
 
     def execute(
         self,
@@ -337,7 +286,6 @@ class SQLConnect:
         query_params: Optional[QueryParams] = None,
         *,
         cursor_class: Type[Cursor] = None,
-        slow_threshold: Optional[float] = None,
     ) -> None:
         """
         Executes a statement without returning results, and without transaction behavior.
@@ -351,7 +299,7 @@ class SQLConnect:
         """
         cursor = self.adapter.cursor(cursor_class=cursor_class)
         try:
-            self.adapter.execute(cursor, query_string, query_params, slow_threshold=slow_threshold)
+            self.adapter.execute(cursor, query_string, query_params)
         finally:
             cursor.close()
 
@@ -362,16 +310,13 @@ class SQLConnect:
         query_params: Optional[QueryParams] = None,
         *,
         cursor_class: Type[Cursor] = None,
-        slow_threshold: Optional[float] = None,
     ) -> Sequence[Any]:
         """
         Arguments:
             slow_threshold: float (optional) -- After how many seconds a query is
                 considered slow.
         """
-        return self.adapter.select(
-            query_string, query_params, cursor_class=cursor_class, slow_threshold=slow_threshold
-        )
+        return self.adapter.select(query_string, query_params, cursor_class=cursor_class)
 
     @documented_by(DatabaseAdapter.select_row)
     def select_row(
@@ -380,31 +325,26 @@ class SQLConnect:
         query_params: Optional[QueryParams] = None,
         *,
         cursor_class: Type[Cursor] = None,
-        slow_threshold: Optional[float] = None,
     ) -> Any:
         """
         Arguments:
             slow_threshold: float (optional) -- After how many seconds a query is
                 considered slow.
         """
-        return self.adapter.select_row(
-            query_string, query_params, cursor_class=cursor_class, slow_threshold=slow_threshold
-        )
+        return self.adapter.select_row(query_string, query_params, cursor_class=cursor_class)
 
     @documented_by(DatabaseAdapter.select_value)
     def select_value(
         self,
         query_string: QueryT,
         query_params: Optional[QueryParams] = None,
-        *,
-        slow_threshold: Optional[float] = None,
     ) -> Any:
         """
         Arguments:
             slow_threshold: float (optional) -- After how many seconds a query is
                 considered slow.
         """
-        return self.adapter.select_value(query_string, query_params, slow_threshold=slow_threshold)
+        return self.adapter.select_value(query_string, query_params)
 
     @documented_by(DatabaseAdapter.select_iter)
     def select_iter(
@@ -415,7 +355,6 @@ class SQLConnect:
         cursor_class: Type[Cursor] = None,
         batch_size: Optional[int] = None,
         fetch_batch_size: Optional[int] = None,
-        slow_threshold: Optional[float] = None,
     ) -> Iterator:
         """
         Arguments:
@@ -428,16 +367,13 @@ class SQLConnect:
             cursor_class=cursor_class,
             batch_size=batch_size,
             fetch_batch_size=fetch_batch_size,
-            slow_threshold=slow_threshold,
         )
 
     def get_dict_query_results(
         self,
         query_string: QueryT,
         query_params: Optional[QueryParams] = None,
-        *,
-        slow_threshold: Optional[float] = None,
-    ) -> Sequence[Dict[str, Any]]:
+    ) -> Sequence[dict[str, Any]]:
         """
         Returns the query results as a list, with each entry encoded as a dictionary.
         The keys are the lower-case column names from the query results.
@@ -446,11 +382,8 @@ class SQLConnect:
             query_string,
             query_params,
             cursor_class=DictCursor,
-            slow_threshold=slow_threshold,
         )
-        results = [
-            {denormalize_name(self.database_type, k): v for k, v in row.items()} for row in results
-        ]
+        results = [{k: v for k, v in row.items()} for row in results]
         return results
 
     @documented_by(DatabaseAdapter.exists)
@@ -458,10 +391,8 @@ class SQLConnect:
         self,
         query_string: QueryT,
         query_params: Optional[QueryParams] = None,
-        *,
-        slow_threshold: Optional[float] = None,
     ) -> bool:
-        return self.adapter.exists(query_string, query_params, slow_threshold=slow_threshold)
+        return self.adapter.exists(query_string, query_params)
 
     def get_row_count(self) -> Optional[int]:
         """Returns count of rows found (disregarding LIMIT) for the last-executed query."""
@@ -501,22 +432,6 @@ class SQLConnect:
         """
         self.adapter.cancel()
 
-    def normalize_identifier(self, name: str) -> str:
-        """
-        Normalizes a database identifier, such as a table or column name, according to our
-        database-type-specific rules. For MySQL, returns the identifier unchanged.
-        For PostgreSQL, converts `CamelCase` to `snake_case`.
-
-        If you need to use this frequently in a block of code, use this convention to alias it:
-
-            _ = sql_connect.normalize_identifier
-            ...
-            print(_("myCamelCaseColumn"))
-
-        (The same `_` function syntax is used in Altitude Networks' Alembic schema migrations.)
-        """
-        return normalize_name(self.database_type, name)
-
     # High-level utility methods
     # =========================================================================
 
@@ -528,8 +443,7 @@ class SQLConnect:
         *,
         full_stats: bool = False,
         isolation_level: Optional[IsolationLevel] = None,
-        slow_threshold: Optional[float] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Inserts data into a table using the provided query string. This query string
         may include multiple row literals to be inserted, and it may include an
@@ -554,8 +468,6 @@ class SQLConnect:
             isolation_level: IsolationLevel (optional) -- Execute the transaction with
                 the given isolation level. See the `IsolationLevel` enum class for the
                 supported isolation levels.
-            slow_threshold: float (optional) -- specifying after how many seconds the
-                query is considered slow.
 
         Returns:
             Dict representing an "UPSERT report" with information about the effects of
@@ -574,9 +486,7 @@ class SQLConnect:
                     before_cnt = self.adapter.select_value(cnt_query)
 
                 # run the main query
-                self.adapter.execute(
-                    cursor, query_string, query_params, slow_threshold=slow_threshold
-                )
+                self.adapter.execute(cursor, query_string, query_params)
                 affected_rows = cursor.rowcount  # updated rows count as 2, inserted rows count as 1
 
                 if full_stats:
@@ -616,8 +526,7 @@ class SQLConnect:
         *,
         full_stats: bool = False,
         isolation_level: Optional[IsolationLevel] = None,
-        slow_threshold: Optional[float] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Executes and commits a pair of insert and delete queries as one ACID operation
         and reports back the results.
@@ -648,11 +557,9 @@ class SQLConnect:
             isolation_level: IsolationLevel (optional) -- Execute the transaction with
                 the given isolation level. See the `IsolationLevel` enum class for the
                 supported isolation levels.
-            slow_threshold: float (optional) -- specifying after how many seconds the
-                query is considered slow.
 
         Returns:
-            Dict representing an "UPSERT report" with information about the effects of
+            dict representing an "UPSERT report" with information about the effects of
             the operation.
         """
         inserted_rows, updated_rows, deleted_rows = 0, 0, 0
@@ -668,16 +575,12 @@ class SQLConnect:
                     before_cnt = self.adapter.select_value(cnt_query)
 
                 # execute the delete query
-                self.adapter.execute(
-                    cursor, delete_query_string, delete_query_params, slow_threshold=slow_threshold
-                )
+                self.adapter.execute(cursor, delete_query_string, delete_query_params)
                 # updated rows count as 2, inserted rows count as 1
                 delete_affected_rows = cursor.rowcount
 
                 # execute the insert query
-                self.adapter.execute(
-                    cursor, insert_query_string, insert_query_params, slow_threshold=slow_threshold
-                )
+                self.adapter.execute(cursor, insert_query_string, insert_query_params)
                 # updated rows count as 2, inserted rows count as 1
                 insert_affected_rows = cursor.rowcount
 
@@ -713,16 +616,12 @@ class SQLConnect:
         return upsert_report
 
     def yield_fetchmany_query(
-        self,
-        query_string: QueryT,
-        query_params: Optional[QueryParams] = None,
-        size: int = 100,
-        slow_threshold: Optional[float] = None,
-    ) -> Iterator[List[Dict[str, Any]]]:
+        self, query_string: QueryT, query_params: Optional[QueryParams] = None, size: int = 100
+    ) -> Iterator[list[dict[str, Any]]]:
         """Executes a user-defined fetchmany query. Returns a generator for additional results."""
         cursor = self.adapter.cursor(DictCursor)
         try:
-            self.adapter.execute(cursor, query_string, query_params, slow_threshold=slow_threshold)
+            self.adapter.execute(cursor, query_string, query_params)
             results = cursor.fetchmany(size=size)
             while results:
                 yield results

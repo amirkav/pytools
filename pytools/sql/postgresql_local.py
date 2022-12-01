@@ -7,9 +7,9 @@ from typing import Iterator
 import psycopg2
 from docker.models.containers import Container as DockerContainer
 
-from custody_py_tools.docker_utils import get_docker_client, get_docker_container
-from custody_py_tools.sql import DatabaseType, Route, SQLConnect
-from custody_py_tools.sql import Util as SQLUtil
+from pytools.common.docker_utils import get_docker_client, get_docker_container
+from pytools.sql import Route, SQLConnect
+from pytools.sql import Util as SQLUtil
 
 DEFAULT_POSTGRESQL_CONTAINER = "postgresql-local"
 DEFAULT_POSTGRESQL_VERSION = "12.3"
@@ -40,7 +40,6 @@ def postgresql_via_env() -> Iterator[Route]:
         "verify-full",
     )
     route = Route(
-        database_type=DatabaseType.POSTGRESQL,
         host=os.environ["PGHOST"],
         port=int(os.getenv("PGPORT", str(DEFAULT_ROUTE.port))),
         user=os.environ["PGUSER"],
@@ -155,9 +154,10 @@ def main():
     # sql_connect.execute("")
     # sql_connect = SQLConnect(postgresql_route())
 
-    with SQLConnect(postgresql_route().open() as sql_connect:
+    with SQLConnect(postgresql_route()).open() as sql_connect:
         postgresql_version = sql_connect.select_value("SHOW server_version")
     assert postgresql_version.startswith("12.3 ")
+
 
 if __name__ == "__main__":
     print("__main__")
