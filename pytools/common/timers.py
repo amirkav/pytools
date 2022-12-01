@@ -3,7 +3,7 @@ from types import TracebackType
 from typing import Callable, Optional, Type, Union
 from warnings import warn
 
-from custody_py_tools.logger import Logger
+from pytools.common.logger import Logger
 
 
 class Timer:
