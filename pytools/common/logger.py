@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Type, Union
 from unittest.mock import patch
 
-from custody_py_tools import json_tools
-from custody_py_tools.logger_json_formatter import LoggerJSONFormatter
+from pytools.common import json_utils
+from pytools.common.logger_json_formatter import LoggerJSONFormatter
 
 __all__ = ("Logger", "LoggerError")
 
@@ -572,7 +572,7 @@ class Logger(logging.Logger):
             level -- Level of log message.
             name -- Name of JSON data.
         """
-        message = json_tools.dumps(data, indent=indent)
+        message = json_utils.dumps(data, indent=indent)
         if name:
             message = f"{name} = {message}"
         self.log(msg=message, level=level)

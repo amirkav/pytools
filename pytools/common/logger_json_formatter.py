@@ -3,7 +3,7 @@ from logging import Formatter, LogRecord, StrFormatStyle
 from string import Formatter as StrFormatter
 from typing import Any, Dict, Optional, Pattern, Type, TypeVar
 
-from custody_py_tools import json_tools
+from pytools.common import json_utils
 
 _R = TypeVar("_R", bound="LoggerJSONFormatter")
 
@@ -42,7 +42,7 @@ class JSONStrFormatStyle(StrFormatStyle):
 
     def __init__(self, fmt: Optional[str] = None) -> None:
         super().__init__("")
-        self._dict_fmt = json_tools.loads(fmt or "{}")
+        self._dict_fmt = json_utils.loads(fmt or "{}")
         self._str_formatter = StrFormatter()
 
     def validate(self) -> None:
@@ -71,7 +71,7 @@ class JSONStrFormatStyle(StrFormatStyle):
                 result[key] = value
                 continue
             result[key] = value.format(**format_dict)
-        return json_tools.dumps(result, sort_keys=False, indent=None)
+        return json_utils.dumps(result, sort_keys=False, indent=None)
 
 
 class LoggerJSONFormatter(Formatter):
@@ -127,10 +127,10 @@ class LoggerJSONFormatter(Formatter):
     ) -> None:
         self._style: JSONStrFormatStyle
         if not fmt:
-            fmt = json_tools.dumps(self.default_dict_format)
+            fmt = json_utils.dumps(self.default_dict_format)
 
         self.default_format = fmt
-        self.dict_format = json_tools.loads(fmt)
+        self.dict_format = json_utils.loads(fmt)
         self._style = JSONStrFormatStyle(fmt)
 
         if validate:
@@ -158,7 +158,7 @@ class LoggerJSONFormatter(Formatter):
             })
             ```
         """
-        return cls(fmt=json_tools.dumps(data), datefmt=datefmt)
+        return cls(fmt=json_utils.dumps(data), datefmt=datefmt)
 
     def format(self, record: LogRecord) -> str:
         record.message = record.getMessage()
