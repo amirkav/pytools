@@ -1,0 +1,16 @@
+FROM lambci/lambda:build-python3.6
+
+ARG INTERNAL_PYPI_USERNAME
+ARG INTERNAL_PYPI_PASS
+ARG INTERNAL_PYPI_URL
+
+RUN curl http://www.winfield.demon.nl/linux/antiword-0.37.tar.gz | tar xzv
+RUN cd antiword-0.37 && make install && cd -
+RUN yum -y install poppler-cpp-devel
+
+ENV PYPI_REPO https://${INTERNAL_PYPI_USERNAME}:${INTERNAL_PYPI_PASS}@${INTERNAL_PYPI_URL}
+RUN python -m pip install -i ${PYPI_REPO} 'pdfminer.six==20200726'
+
+COPY ./scripts/lambda_layer_output.sh ./run.sh
+
+CMD ["./run.sh"]
