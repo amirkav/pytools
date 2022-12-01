@@ -10,15 +10,21 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterator, Optional, Tuple, Type, TypeVar, cast
 
-from custody_py_tools.logger import Logger
-from custody_py_tools.sentinel import SentinelValue
-from custody_py_tools.string_tools import StringTools
+from pytools.common.logger import Logger
+from pytools.common.sentinel import SentinelValue
+from pytools.common.string_utils import StringTools
 
 FunctionType = TypeVar("FunctionType", bound=Callable[..., Any])
 
 
 @dataclass
 class RetryState:
+    """
+    Stores the state of the retry loop. This is used for thread-safety.
+    It also makes the code cleaner by acting as a container for all the attributes
+    that are used in the retry loop.
+    """
+
     method: Callable
     method_parent: Optional[Callable]
     method_args: Tuple
@@ -29,19 +35,19 @@ class RetryState:
 
 
 #######################################
-class RetryAndCatch:
+class RetryAndBackoff:
     """
     A decorator to retry a call on all exceptions except the ones defined in {
-    exceptions_to_suppress}.
+    exceptions_to_raise}.
     Works with functions and class methods.
 
     ```python
     class APIClient:
-        @RetryAndCatch(num_tries=5)
+        @RetryAndBackoff(num_tries=5)
         def get_items(self):
             ...
 
-    @RetryAndCatch(exceptions_to_suppress=(OSError, ))
+    @RetryAndBackoff(exceptions_to_raise=(OSError, ))
     def read_files():
         ...
     ```
@@ -51,8 +57,8 @@ class RetryAndCatch:
         backoff -- Generator that gets original delay and yields delay for retries.
         logger -- Logger instance. If not passed, logger will be created internally.
         log_level -- Level of a log message on retry.
-        exceptions_to_catch -- List of expected exceptions. `default_exceptions` is used if None.
-        exceptions_to_suppress -- Tuple of exceptions that should not be retried and raised
+        exceptions_to_retry -- List of expected exceptions. `default_exceptions` is used if None.
+        exceptions_to_raise -- Tuple of exceptions that should not be retried and raised
                                   immediately if fallback_value is not provided.
         fallback_value -- Return value on fait. If not provided, exception is raised.
 
@@ -68,7 +74,7 @@ class RetryAndCatch:
 
     NOT_SET: Any = SentinelValue("NOT_SET")
     default_exceptions: Tuple[Type[BaseException], ...] = (Exception,)
-    default_exceptions_to_suppress: Tuple[Type[BaseException], ...] = tuple()
+    default_exceptions_to_raise: Tuple[Type[BaseException], ...] = tuple()
     default_num_tries = 5
     default_log_level = Logger.ERROR
     default_fallback_value: Any = NOT_SET
@@ -83,15 +89,15 @@ class RetryAndCatch:
         backoff: Optional[Callable[[int], int]] = None,
         logger: Optional[Logger] = None,
         log_level: Optional[int] = None,
-        exceptions_to_catch: Optional[Tuple[Type[BaseException], ...]] = None,
-        exceptions_to_suppress: Optional[Tuple[Type[BaseException], ...]] = None,
+        exceptions_to_retry: Optional[Tuple[Type[BaseException], ...]] = None,
+        exceptions_to_raise: Optional[Tuple[Type[BaseException], ...]] = None,
         fallback_value: Any = NOT_SET,
     ) -> None:
         self.max_tries = max(num_tries if num_tries is not None else self.default_num_tries, 1)
         self._backoff_func = backoff if backoff is not None else self.backoff
         self._log_level = log_level if log_level is not None else self.default_log_level
-        self._exceptions_to_catch = exceptions_to_catch or self.default_exceptions
-        self._exceptions_to_suppress = exceptions_to_suppress or self.default_exceptions_to_suppress
+        self._exceptions_to_retry = exceptions_to_retry or self.default_exceptions
+        self._exceptions_to_raise = exceptions_to_raise or self.default_exceptions_to_raise
         self._lazy_logger = logger
 
         self._fallback_value = fallback_value
@@ -131,7 +137,7 @@ class RetryAndCatch:
         """
         Override this function to translate errors into more specific exceptions
 
-        See: RetryAndCatchGsuite.translate_errors for example usage
+        See: RetryAndBackoffGsuite.translate_errors for example usage
         """
         yield
 
@@ -255,12 +261,12 @@ class RetryAndCatch:
                 try:
                     with self.translate_errors():
                         return f(*args, **kwargs)
-                except self._exceptions_to_suppress as e:
+                except self._exceptions_to_raise as e:
                     # don't retry the exception
                     state.tries_remaining = 0
                     state.exception = e
                     self.handle_exception(e, state)
-                except self._exceptions_to_catch as e:
+                except self._exceptions_to_retry as e:
                     state.tries_remaining -= 1
                     state.exception = e
                     self.handle_exception(e, state)
@@ -279,3 +285,22 @@ class RetryAndCatch:
             return self._fallback(state)
 
         return cast(FunctionType, wrapper)
+
+
+#######################################
+class RetryBackoffReturnNone(RetryAndBackoff):
+    """
+    Retry per the RetryAndBackoff class, but return None on ultimate failure.
+    For example, the following will return None immediately without retrying,
+    but will log message as exception and return None.
+
+    class MyClass:
+        @RetryBackoffReturnNone(exceptions_to_suppress=(ValueError,))
+        def my_func(self) -> None:
+            raise ValueError(f"Unable to run my_func for {self}")
+
+    c = MyClass()
+    logger.debug(f"Result: {c.my_func()}")
+    """
+
+    default_fallback_value = None
