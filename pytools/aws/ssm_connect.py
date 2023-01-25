@@ -3,7 +3,7 @@
 from typing import Any
 
 from pytools.aws.boto3_connect import Boto3Connect
-from pytools.common.string_utils import StringTools
+from pytools.common.string_utils import StringUtils
 
 RawAWSResponse = Any
 

@@ -6,8 +6,8 @@ from typing import Any, Dict, List, Optional
 
 from jsonschema import SchemaError, ValidationError, validate
 
-from tools import json_utils
-from tools.logger import Logger
+from pytools import json_utils
+from pytools.common.logger import Logger
 
 _cw_emf_schema_path = (
     pathlib.Path(__file__).parent.parent / "./resources/cw_embedded_metrics/cw_emf_schema.json"
