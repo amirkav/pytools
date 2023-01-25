@@ -12,7 +12,7 @@ from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional, Tuple
 
 from pytools.common import list_utils
 from pytools.common.logger import Logger
-from pytools.common.string_utils import StringTools
+from pytools.common.string_utils import StringUtils
 
 logger = Logger(__name__)
 
@@ -75,7 +75,7 @@ def recursive_merge_dict(base_dict: dict, new_dict: dict) -> dict:
 
 def dict_keys_snake_to_camel_case(dict_to_update: Dict[str, Any]) -> Dict[str, Any]:
     return {
-        StringTools.convert_snake_case_to_camel_case(key): (
+        StringUtils.convert_snake_case_to_camel_case(key): (
             dict_keys_snake_to_camel_case(value) if isinstance(value, dict) else value
         )
         for key, value in dict_to_update.items()
@@ -84,7 +84,7 @@ def dict_keys_snake_to_camel_case(dict_to_update: Dict[str, Any]) -> Dict[str, A
 
 def dict_keys_camel_to_snake_case(dict_to_update: Dict[str, Any]) -> Dict[str, Any]:
     return {
-        StringTools.convert_camel_case_to_snake_case(key): (
+        StringUtils.convert_camel_case_to_snake_case(key): (
             dict_keys_camel_to_snake_case(value) if isinstance(value, dict) else value
         )
         for key, value in dict_to_update.items()

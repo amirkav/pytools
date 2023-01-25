@@ -17,7 +17,7 @@ SNAKE_CASE_PATTERN = re.compile(r"[_-]\S")
 SNAKE_CASE_REPLACEMENT_SYMBOLS = re.compile("[_-]")
 
 
-class StringTools:
+class StringUtils:
     STRING_FALSE_VALUES = {"0", "false", "no", "none", "null"}
 
     @staticmethod
@@ -50,7 +50,7 @@ class StringTools:
         if mystr is None:
             return False
 
-        if mystr.lower() in StringTools.STRING_FALSE_VALUES:
+        if mystr.lower() in StringUtils.STRING_FALSE_VALUES:
             return False
 
         return True
@@ -154,7 +154,7 @@ class StringTools:
         Generator to build unique strings from "aa...a" to "zz...z".
 
         ```python
-        gen = StringTools.ascii_string_generator()
+        gen = StringUtils.ascii_string_generator()
         next(gen)  # 'aaa'
         next(gen)  # 'aab'
         list(gen)[-1]  # 'zzz'
@@ -205,7 +205,7 @@ class StringTools:
         Extract format keys from a formet-ready string.
 
         ```python
-        keys = StringTools.get_format_keys('key: {key} {value}')
+        keys = StringUtils.get_format_keys('key: {key} {value}')
         keys # ['key', 'value']
         ```
 
@@ -235,9 +235,9 @@ class StringTools:
         if `length` is enough.
 
         ```python
-        StringTools.generate_random_string(5) # 'XHdcS'
-        StringTools.generate_random_string(8, '123') # '32221131'
-        StringTools.generate_random_string(8, '123', '&!') # '22!11&31'
+        StringUtils.generate_random_string(5) # 'XHdcS'
+        StringUtils.generate_random_string(8, '123') # '32221131'
+        StringUtils.generate_random_string(8, '123', '&!') # '22!11&31'
         ```
 
         Arguments:
@@ -362,7 +362,7 @@ class StringTools:
         """
         match_result = []
         for string_to_compare in string_list:
-            ratio = StringTools.get_strings_similarity_score(string_a, string_to_compare)
+            ratio = StringUtils.get_strings_similarity_score(string_a, string_to_compare)
 
             if ratio >= min_ratio:
                 match_result.append((string_a, string_to_compare, ratio))
@@ -372,14 +372,14 @@ class StringTools:
 
 def main() -> None:
     logger = Logger(__name__, level=Logger.DEBUG)
-    str_tools = StringTools()
+    str_tools = StringUtils()
     logger.debug(f'{str_tools.list_of_str("test")}')
     logger.debug(f'{str_tools.list_of_str(["test"])}')
     logger.debug(f'{str_tools.list_of_str(["test1", "test2"])}')
     logger.debug(f'{str_tools.list_of_str(list("test"))}')
-    clean_str = StringTools.remove_control_chars("\ttest\n")
+    clean_str = StringUtils.remove_control_chars("\ttest\n")
     logger.debug(f"{clean_str}")
-    logger.debug(StringTools.convert_camel_case_to_snake_case("TestRun"))
+    logger.debug(StringUtils.convert_camel_case_to_snake_case("TestRun"))
 
 
 if __name__ == "__main__":
