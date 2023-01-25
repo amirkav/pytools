@@ -118,3 +118,4 @@ ENV/
 *.gz
 
 # add local extra rules after this comment
+_local*
