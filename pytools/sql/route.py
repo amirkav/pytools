@@ -55,14 +55,10 @@ class Route:
             `Route` object describing where to connect and how to authenticate.
         """
         boto3_session = boto3_session or Boto3SessionGenerator().generate_default_session()
-        ssm_connect = ssm_connect or SsmConnect(configs.aws_region, boto3_session=boto3_session)
+        ssm_connect = ssm_connect or SsmConnect(boto3_session=boto3_session)
 
-        host = (
-            configs.postgresql_endpoint
-            if use_writer or use_master
-            else configs.postgresql_db_ro_endpoint
-        )
-        port = configs.postgresql_db_port or 5432
+        host = configs.pg_db_endpoint if use_writer or use_master else configs.pg_db_ro_endpoint
+        port = configs.pg_db_port or 5432
 
         database = configs.db_name
         # Master user cannot use IAM auth:
@@ -70,7 +66,7 @@ class Route:
 
         # User name:
         if use_master:
-            user = configs.postgresql_master_user
+            user = configs.pg_master_user
         elif use_writer:
             user = configs.readwrite_user
         else:
@@ -201,7 +197,7 @@ class Route:
         self._password, self.expires_at = token, expires_at
 
     def __str__(self) -> str:
-        return self.anonymous_sql_alchemy_connection_url
+        return self.sql_alchemy_connection_url
 
     @property
     def expired(self) -> bool:

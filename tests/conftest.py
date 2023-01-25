@@ -18,7 +18,7 @@ from pytools.sql_fixtures import (
 )
 from pytools.catalogs import Platform
 from pytools.config import Config
-from pytools.dynamo.config_manager import ConfigManager
+from pytools.dynamo.config_manager import ConfigsInterface
 from pytools.param_store import ParamStore
 from pytools.retry_backoff_class import RetryAndCatch
 from pytools.s3_connect import S3Connect
@@ -120,7 +120,7 @@ def mock_config():
 
     config.project_name = "test"
     config.env = "test"
-    config.aws_account = "123456789"
+    config.aws_account_id = "123456789"
     config.aws_region = "aws_region"
     config.s3_bucket = f"test-{config.project_name}-{config.env}"
     config.sentry_dsn = "https://sentry_dsn"
@@ -129,12 +129,12 @@ def mock_config():
 
     # Read-only DB access:
     config.db_ro_endpoint = "test-mysql-ro.us-west-2.rds.amazonaws.com"
-    config.postgresql_db_ro_endpoint = "test-pg-ro.us-west-2.rds.amazonaws.com"
+    config.pg_db_ro_endpoint = "test-pg-ro.us-west-2.rds.amazonaws.com"
     config.readonly_user = "readonly_user"
 
     # Read-write DB access:
     config.endpoint = "test-mysql.us-west-2.rds.amazonaws.com"
-    config.postgresql_endpoint = "test-pg.us-west-2.rds.amazonaws.com"
+    config.pg_db_endpoint = "test-pg.us-west-2.rds.amazonaws.com"
     config.readwrite_user = "readwrite_user"
 
     # Master-user DB access:
@@ -229,7 +229,7 @@ def local_config(dynamodb_local, mock_config, mock_s3_connect):
         "status": "active",
     }
 
-    config_manager = ConfigManager(
+    config_manager = ConfigsInterface(
         project_id=project_name,
         aws_region=aws_region,
         env=env,

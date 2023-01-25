@@ -20,7 +20,7 @@ from typing import (
     Union,
 )
 
-from pytools.common.class_tools import cached_property
+from pytools.common.class_utils import cached_property
 from pytools.common.dynamic_namespace import DynamicNamespace
 
 from .. import pep249

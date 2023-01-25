@@ -18,7 +18,7 @@ import psycopg2.extras
 
 import pytools.common.retry_backoff
 import pytools.sql.adapters.base
-from pytools.common.class_tools import cached_property
+from pytools.common.class_utils import cached_property
 from pytools.common.file_utils import relativize_path
 from pytools.common.retry_backoff import RetryAndBackoff
 from pytools.common.call_stack import getcaller
