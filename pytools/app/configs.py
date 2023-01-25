@@ -1,51 +1,54 @@
 from __future__ import annotations
 
 import os
-import time
 from dataclasses import asdict, dataclass
-from enum import Enum
-from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, cast
+from typing import Any, Callable, Dict, Iterable, Optional, cast
 
 from pytools.aws.boto3_session_generator import Boto3Session, Boto3SessionGenerator
-from pytools.common.class_tools import cached_property
+from pytools.aws.sts_connect import StsConnect
+from pytools.common.class_utils import cached_property
 from pytools.common.datetime_utils import UNIX_DATETIME_FORMAT
 from pytools.common.dict_utils import get_nested_item
 
-# from pytools.dynamo_connect import DynamoConnect
+from pytools.aws.dynamo_connect import DynamoConnect
 from pytools.common.logger import Logger
+
+
+# TODO: Write a __repr__ method for this class. Use the "backup" method to create a YAML string and send to output.
 
 
 class Configs:
     """
-    A state class to store and manage project resource identifiers.
-    It loads its base data from 'configs' table on dynamodb.
+    An interface to the application's configs.
+    Acts as a resource identifier for different entities (customers, projects, etc.).
+    It can be thought of a static state machine, where the actual state is stored in DynamoDB,
+    and is loaded on demand via this class.
+    For a more dynamic state machine, see `pytools.app.data_state_table`.
+
+    For the details of DynamoDB table and how it is set up, see `pytools.dynamo.configs_table`.
 
     Raises:
         KeyError -- If `env` or `aws_region` are not set and not exist in ENV.
     """
 
-    @dataclass
-    class InternalDomain:
-        name: str
-        affiliate_level: int = 100
-
     TTL = 60  # Cache DynamoDB record for this many seconds.
 
-    table_name = "configs"
+    # This must match the DynamoTableBase.table_name property and the DynamoDB table name.
+    table_name = "Configs"
 
     def __init__(
         self,
-        pk: str,
+        id: str,
         env: Optional[str] = None,
         aws_region: Optional[str] = None,
+        app_name: Optional[str] = None,
         boto3_session: Optional[Boto3Session] = None,
         suffix: Optional[str] = None,
     ) -> None:
-        self._pk = pk
+        self._id = id
         self._env = env or os.environ["ENV"]
         self._aws_region = aws_region or os.environ["AWS_REGION"]
-        self._aws_account = self.get_aws_account(self._env)
+        self._app_name = app_name or os.environ["APP_NAME"]
         self._suffix = suffix
         self._logger = Logger(__name__)
         self._configs: Optional[Dict[str, Any]] = None
@@ -60,19 +63,22 @@ class Configs:
         self._dyn_connect = DynamoConnect(
             aws_region=self.aws_region, boto3_session=self._boto3_session
         )
+        self._sts_connect = StsConnect(
+            aws_region=self.aws_region, boto3_session=self._boto3_session
+        )
 
     @property
     def boto3_session(self) -> Boto3Session:
         return self._boto3_session
 
-    def get_configs(self) -> Dict[str, Any]:
+    def _get_configs(self, id: str) -> Dict[str, Any]:
         """
         Read config record from `configs` DynamoDB table and return it without caching.
         """
         self._logger.debug("Reading configs record from dynamodb.")
         return cast(
             Dict[str, Any],
-            self._dyn_connect.get_item(Configs.table_name, key_dict={"pk": self.pk}),
+            self._dyn_connect.get_item(Configs.table_name, key_dict={"pk": id}),
         )
 
     def get_attribute(
@@ -99,19 +105,6 @@ class Configs:
             return None
 
     @staticmethod
-    def get_aws_account(env: str) -> str:
-        account_id = {
-            "local": "0",
-            "dev": "??",
-            "staging": "??",
-            "prod": "??",
-            "master": "??",
-        }.get(env)
-        if account_id:
-            return account_id
-        raise ValueError(f"Cannot get aws_account for unknown env {env}")
-
-    @staticmethod
     def typed_getenv(
         env_var: str, parser: Optional[Callable[[str], Any]] = None, default: Any = None
     ) -> Any:
@@ -122,36 +115,24 @@ class Configs:
             value = parser(value)
         return value
 
-    @property
+    @cached_property(ttl=TTL)
     def configs(self) -> Dict[str, Any]:
         """
         Return config record. Reads from `configs` DynamoDB table and caches for up to
         `Configs.TTL` seconds (60 seconds).
         """
-        # This property cannot use the `@cached_property` decorator since that currently lacks
-        # an explicit cache invalidation mechanism, which is needed by `_set_attr` and other methods
-        # below.
-        now = time.time()
-        if self._configs is None or now >= self._configs_expires_at:
-            self._configs = self.get_configs()
-            self._configs_expires_at = now + self.TTL
-        return self._configs
-
-    @cached_property
-    def ext_int_configs(self) -> Dict[str, Any]:
-        return cast(
-            Dict[str, Any],
-            self._dyn_connect.get_item(
-                Configs.table_name, key_dict={"pk": "_external_integrations"}
-            ),
-        )
+        return self._get_configs(id=self.id)
 
     # Core item configuration
     # =========================================================================
 
     @property
-    def pk(self) -> str:
-        return self._pk
+    def id(self) -> str:
+        return self._id
+
+    @property
+    def app_name(self) -> str:
+        return self._app_name
 
     @property
     def env(self) -> str:
@@ -171,9 +152,9 @@ class Configs:
             self._suffix = os.environ.get("SUFFIX") or "01"
         return self._suffix
 
-    @property
-    def aws_account(self) -> str:
-        return self._aws_account
+    @cached_property
+    def aws_account_id(self) -> str:
+        return self._sts_connect.get_account_id()
 
     # Infrastructure
     # =========================================================================
@@ -188,21 +169,14 @@ class Configs:
 
     @property
     def s3_bucket(self) -> str:
-        bucket_name = self.get_attribute(self.configs, [self.env, self.aws_region, "s3_bucket"])
-        if bucket_name is None:
-            return self.get_default_bucket_name()
-        return bucket_name
+        return self.get_attribute(self.configs, [self.env, self.aws_region, "s3_bucket"])
 
     # Database configuration
     # =========================================================================
 
     @property
-    def is_shared_rds_cluster(self) -> bool:
-        return not self.local and (self.has_parent_project or self.is_shared_rsa)
-
-    @property
-    def is_shared_db(self) -> bool:
-        return not self.local and self.has_parent_project
+    def db_instance_id(self) -> str:
+        return self.get_attribute(self.configs, [self.env, self.aws_region, "db_instance_id"])
 
     @property
     def db_iam_auth(self) -> bool:
@@ -210,40 +184,31 @@ class Configs:
 
     @property
     def readonly_user(self) -> str:
-        return (
-            f"{self.pk}_{self.env}_ro" if self.is_shared_rds_cluster else f"{self.env}_readonlyuser"
-        )
+        return f"{self.id}_{self.env}_ro"
 
     @property
     def readwrite_user(self) -> str:
-        return (
-            f"{self.pk}_{self.env}_rw"
-            if self.is_shared_rds_cluster
-            else f"{self.env}_readwriteuser"
-        )
-
-    @property
-    def default_master_pass_parameter(self) -> str:
-        return f"/altitude/{self.env}/db_default_master_pass"
-
-    @property
-    def master_pass_parameter(self) -> str:
-        return self.get_attribute(
-            self.configs, [self.env, self.aws_region, "master_pass_parameter"]
-        )
+        return f"{self.id}_{self.env}_rw"
 
     @property
     def readonly_pass_parameter(self) -> str:
-        return f"/{self.project_prefix}/{self.env}/{self.aws_region}/db_readonly_pass"
+        return f"/{self.app_name}/{self.env}/{self.aws_region}/{self.id}/db_readonly_pass"
 
     @property
     def readwrite_pass_parameter(self) -> str:
-        return f"/{self.project_prefix}/{self.env}/{self.aws_region}/db_readwrite_pass"
+        return f"/{self.app_name}/{self.env}/{self.aws_region}/{self.id}/db_readwrite_pass"
+
+    @property
+    def master_pass_parameter(self) -> str:
+        return f"/{self.app_name}/{self.env}/{self.aws_region}/{self.db_instance_id}/db_master_pass"
 
     @property
     def rds_cert_parameter(self) -> str:
-        return self.get_attribute(self.configs, [self.env, self.aws_region, "rds_cert_parameter"])
+        return f"/{self.app_name}/{self.env}/{self.aws_region}/{self.db_instance_id}/rds_cert"
 
+    # Bastion host
+    # TODO: abstract these to a separate record dedicated to the bastion host, and only reference it in each individual project record
+    # -------------------------------------------------------------------------
     @property
     def db_bastion_username(self) -> str:
         return "ec2-user"
@@ -258,50 +223,55 @@ class Configs:
 
     @property
     def db_name(self) -> str:
-        return f"{self.project_prefix}_{self.env}"
+        return f"{self.id}_{self.env}"
 
     # PostgreSQL database
     # -------------------------------------------------------------------------
+    @cached_property
+    def db_configs(self) -> Dict[str, Any]:
+        """
+        Configs for the database instance.
+        """
+        return self._get_configs(self.db_instance_id)
 
     @property
-    def has_postgresql(self) -> bool:
-        return bool(self.postgresql_endpoint)
+    def pg_db_endpoint(self) -> str:
+        return self.get_attribute(self.db_configs, [self.env, self.aws_region, "pg_db_endpoint"])
 
     @property
-    def postgresql_endpoint(self) -> str:
+    def pg_db_ro_endpoint(self) -> str:
+        return self.get_attribute(self.db_configs, [self.env, self.aws_region, "pg_db_ro_endpoint"])
+
+    @property
+    def pg_db_api_endpoint(self) -> str:
         return self.get_attribute(
-            self.configs, [self.env, self.aws_region, "postgresql_db_endpoint"]
+            self.db_configs, [self.env, self.aws_region, "pg_db_api_endpoint"]
         )
 
     @property
-    def postgresql_db_ro_endpoint(self) -> str:
-        return self.get_attribute(
-            self.configs, [self.env, self.aws_region, "postgresql_db_ro_endpoint"]
-        )
+    def pg_db_cluster_id(self) -> str:
+        return self.get_attribute(self.db_configs, [self.env, self.aws_region, "pg_db_cluster_id"])
 
     @property
-    def postgresql_db_api_endpoint(self) -> str:
-        return self.get_attribute(
-            self.configs, [self.env, self.aws_region, "postgresql_db_api_endpoint"]
-        )
+    def pg_db_instance_id(self) -> str:
+        return self.get_attribute(self.db_configs, [self.env, self.aws_region, "pg_db_instance_id"])
 
     @property
-    def postgresql_db_cluster_id(self) -> str:
-        return self.get_attribute(
-            self.configs, [self.env, self.aws_region, "postgresql_db_cluster_id"]
-        )
-
-    @property
-    def postgresql_db_instance_id(self) -> str:
-        return self.get_attribute(
-            self.configs, [self.env, self.aws_region, "postgresql_db_instance_id"]
-        )
-
-    @property
-    def postgresql_db_port(self) -> int:
-        value = self.get_attribute(self.configs, [self.env, self.aws_region, "postgresql_db_port"])
+    def pg_db_port(self) -> int:
+        value = self.get_attribute(self.db_configs, [self.env, self.aws_region, "pg_db_port"])
         return int(value) if value else 5432
 
     @property
-    def postgresql_master_user(self) -> str:
+    def pg_master_user(self) -> str:
         return "postgres"
+
+
+def main():
+
+    configs = Configs("pgsb")
+    print(configs.aws_account_id)
+    print(configs.pg_db_endpoint)
+
+
+if __name__ == "__main__":
+    main()
