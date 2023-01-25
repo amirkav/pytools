@@ -8,7 +8,7 @@ from botocore.config import Config as Boto3Config
 from botocore.exceptions import ClientError
 
 from pytools.aws.boto3_session_generator import Boto3Session, Boto3SessionGenerator
-from pytools.common.class_tools import cached_property
+from pytools.common.class_utils import cached_property
 from pytools.common.logger import Logger
 
 RawAWSResponse = Any

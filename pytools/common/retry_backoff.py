@@ -12,7 +12,7 @@ from typing import Any, Callable, Dict, Iterator, Optional, Tuple, Type, TypeVar
 
 from pytools.common.logger import Logger
 from pytools.common.sentinel import SentinelValue
-from pytools.common.string_utils import StringTools
+from pytools.common.string_utils import StringUtils
 
 FunctionType = TypeVar("FunctionType", bound=Callable[..., Any])
 
@@ -277,7 +277,7 @@ class RetryAndBackoff:
                         message = (
                             f"Backing off for {delay:.1f} seconds and "
                             f"retrying {state.tries_remaining} more "
-                            f"{StringTools.pluralize(state.tries_remaining, 'time')}."
+                            f"{StringUtils.pluralize(state.tries_remaining, 'time')}."
                         )
                         self._log(message, exception=state.exception)
                         time.sleep(delay)

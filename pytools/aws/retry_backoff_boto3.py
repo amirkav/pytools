@@ -59,7 +59,7 @@ from typing import Any, Iterator, List, Tuple, Type
 
 from pytools.aws import boto3_errors
 from pytools.common.retry_backoff import RetryAndBackoff, RetryState
-from pytools.common.string_utils import StringTools
+from pytools.common.string_utils import StringUtils
 
 
 class BatchUnprocessedItemsError(Exception):
@@ -110,7 +110,7 @@ class RetryAndBackoffBoto3(RetryAndBackoff):
         if isinstance(exc, BatchUnprocessedItemsError):
             items_count = len(exc.unprocessed_items)
             message = (
-                f"{items_count} unprocessed {StringTools.pluralize(items_count, 'item')} left."
+                f"{items_count} unprocessed {StringUtils.pluralize(items_count, 'item')} left."
             )
             self._logger.log(msg=message, level=self._log_level)
 

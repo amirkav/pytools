@@ -37,8 +37,8 @@ class Boto3SessionGenerator:
     def __init__(
         self, default_profile: Optional[str] = None, aws_region: Optional[str] = None
     ) -> None:
+        self.default_profile = default_profile or os.environ.get("AWS_PROFILE")
         self.aws_region = aws_region or os.environ.get("AWS_REGION")
-        self.default_profile = default_profile or os.environ.get("AWS_DEFAULT_PROFILE")
         self._logger = Logger(__name__)
 
     @RetryAndBackoffBoto3Session()
